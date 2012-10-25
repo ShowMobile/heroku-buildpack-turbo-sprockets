@@ -64,6 +64,12 @@ private
         if File.exists?("public/assets/manifest.yml")
           puts "Detected manifest.yml, assuming assets were compiled locally"
           return true
+        else
+          FileUtils.mkdir_p('public')
+          cache_load "public/assets"
+
+          ENV["RAILS_GROUPS"] ||= "assets"
+          ENV["RAILS_ENV"]    ||= "production"
         end
 
         precompile = rake.task("assets:precompile")
@@ -84,6 +90,33 @@ private
         else
           log "assets_precompile", :status => "failure"
           error "Precompiling assets failed."
+          if $?.success?
+            log "assets_precompile", :status => "success"
+            puts "Asset precompilation completed (#{"%.2f" % time}s)"
+
+            # If 'turbo-sprockets-rails3' gem is available, run 'assets:clean_expired' and
+            # cache assets if task was successful.
+            if gem_is_bundled?('turbo-sprockets-rails3')
+              log("assets_clean_expired") do
+                run("env PATH=$PATH:bin bundle exec rake assets:clean_expired 2>&1")
+                if $?.success?
+                  log "assets_clean_expired", :status => "success"
+                  cache_store "public/assets"
+                else
+                  log "assets_clean_expired", :status => "failure"
+                  cache_clear "public/assets"
+                end
+              end
+            else
+              cache_clear "public/assets"
+            end
+          else
+            log "assets_precompile", :status => "failure"
+            puts "Precompiling assets failed, enabling runtime asset compilation"
+            install_plugin("rails31_enable_runtime_asset_compilation")
+            puts "Please see this article for troubleshooting help:"
+            puts "http://devcenter.heroku.com/articles/rails31_heroku_cedar#troubleshooting"
+          end
         end
       end
     end
